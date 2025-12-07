@@ -16,6 +16,19 @@ void DeleteTrayIcon();
 BOOL IsRunningAsAdmin();
 BOOL RestartAsAdmin();
 
+// 中文常量定义（使用宽字符）
+const WCHAR* g_szTipText = L"键盘钩子程序";
+const WCHAR* g_szMenuPause = L"暂停";
+const WCHAR* g_szMenuResume = L"恢复";
+const WCHAR* g_szMenuExit = L"退出";
+const WCHAR* g_szWindowClass = L"KeyboardHookClass";
+const WCHAR* g_szWindowTitle = L"键盘钩子程序";
+const WCHAR* g_szErrorTitle = L"错误";
+const WCHAR* g_szErrorAdmin = L"需要管理员权限才能运行！";
+const WCHAR* g_szErrorHook = L"Failed to install keyboard hook!";
+const WCHAR* g_szErrorWindow = L"Failed to create window!";
+const WCHAR* g_szErrorClass = L"Failed to register window class!";
+
 // 全局钩子句柄
 HHOOK g_hKeyboardHook = NULL;
 
@@ -58,8 +71,10 @@ BOOL CreateTrayIcon(HWND hWnd) {
     // 设置默认图标（使用系统默认应用程序图标）
     g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
     
-    // 设置提示文本
-    lstrcpy(g_nid.szTip, TEXT("键盘钩子程序"));
+    // 设置提示文本（使用宽字符版本的NOTIFYICONDATA结构体）
+    // 当使用-municode编译时，NOTIFYICONDATA默认是宽字符版本
+    // 所以szTip字段是WCHAR类型，可以直接赋值宽字符串
+    wcscpy(g_nid.szTip, g_szTipText);
     
     // 添加托盘图标
     if (!Shell_NotifyIcon(NIM_ADD, &g_nid)) {
@@ -72,9 +87,9 @@ BOOL CreateTrayIcon(HWND hWnd) {
         return FALSE;
     }
     
-    // 添加菜单项
-    AppendMenu(g_hPopupMenu, MF_STRING, IDM_PAUSE, TEXT("暂停"));
-    AppendMenu(g_hPopupMenu, MF_STRING, IDM_EXIT, TEXT("退出"));
+    // 添加菜单项（使用宽字符版本的函数）
+    AppendMenuW(g_hPopupMenu, MF_STRING, IDM_PAUSE, g_szMenuPause);
+    AppendMenuW(g_hPopupMenu, MF_STRING, IDM_EXIT, g_szMenuExit);
     
     return TRUE;
 }
@@ -116,14 +131,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                             GetCursorPos(&pt);
                             
                             // 设置菜单状态（暂停/恢复）
-                            ModifyMenu(g_hPopupMenu, IDM_PAUSE, MF_BYCOMMAND | MF_STRING, 
-                                      g_isPaused ? IDM_RESUME : IDM_PAUSE, 
-                                      g_isPaused ? TEXT("恢复") : TEXT("暂停"));
+                            // 先移除旧的菜单项
+                            RemoveMenu(g_hPopupMenu, IDM_PAUSE, MF_BYCOMMAND);
+                            // 添加新的菜单项（使用宽字符版本的函数）
+                            if (g_isPaused) {
+                                AppendMenuW(g_hPopupMenu, MF_STRING, IDM_RESUME, g_szMenuResume);
+                            } else {
+                                AppendMenuW(g_hPopupMenu, MF_STRING, IDM_PAUSE, g_szMenuPause);
+                            }
                             
                             // 显示右键菜单
                             SetForegroundWindow(hWnd);
-                            TrackPopupMenu(g_hPopupMenu, TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_RETURNCMD,
-                                          pt.x, pt.y, 0, hWnd, NULL);
+                            // 移除TPM_NONOTIFY标志，这样会发送WM_COMMAND消息
+                            // 或者处理返回值，手动发送WM_COMMAND消息
+                            UINT uSelected = TrackPopupMenu(g_hPopupMenu, 
+                                                           TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                                           pt.x, pt.y, 0, hWnd, NULL);
+                            
+                            // 如果用户选择了菜单项，手动发送WM_COMMAND消息
+                            if (uSelected != 0) {
+                                PostMessage(hWnd, WM_COMMAND, uSelected, 0);
+                            }
+                            
                             PostMessage(hWnd, WM_NULL, 0, 0);
                         }
                         break;
@@ -252,7 +281,7 @@ BOOL RestartAsAdmin() {
         DWORD dwError = GetLastError();
         // 如果用户拒绝了UAC提示，dwError会是ERROR_CANCELLED
         if (dwError != ERROR_CANCELLED) {
-            MessageBox(NULL, TEXT("需要管理员权限才能运行！"), TEXT("错误"), MB_OK | MB_ICONERROR);
+            MessageBoxW(NULL, g_szErrorAdmin, g_szErrorTitle, MB_OK | MB_ICONERROR);
         }
         return FALSE;
     }
@@ -276,7 +305,7 @@ void UninstallKeyboardHook() {
     }
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
     // 检查是否以管理员权限运行
     if (!IsRunningAsAdmin()) {
         // 如果不是管理员，尝试以管理员身份重新启动
@@ -287,9 +316,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
     
-    // 注册窗口类
-    WNDCLASSEX wc = {
-        sizeof(WNDCLASSEX),
+    // 注册窗口类（使用宽字符版本）
+    WNDCLASSEXW wc = {
+        sizeof(WNDCLASSEXW),
         CS_HREDRAW | CS_VREDRAW,
         WndProc,
         0,
@@ -299,20 +328,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         NULL,
         NULL,
         NULL,
-        TEXT("KeyboardHookClass"),
+        g_szWindowClass,
         NULL
     };
     
-    if (!RegisterClassEx(&wc)) {
-        MessageBox(NULL, TEXT("Failed to register window class!"), TEXT("Error"), MB_OK | MB_ICONERROR);
+    if (!RegisterClassExW(&wc)) {
+        MessageBoxW(NULL, g_szErrorClass, g_szErrorTitle, MB_OK | MB_ICONERROR);
         return 1;
     }
     
-    // 创建隐藏窗口
-    g_hWnd = CreateWindowEx(
+    // 创建隐藏窗口（使用宽字符版本）
+    g_hWnd = CreateWindowExW(
         0,
-        TEXT("KeyboardHookClass"),
-        TEXT("键盘钩子程序"),
+        g_szWindowClass,
+        g_szWindowTitle,
         WS_POPUP, // 弹出窗口样式，不显示在任务栏
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -325,13 +354,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     );
     
     if (g_hWnd == NULL) {
-        MessageBox(NULL, TEXT("Failed to create window!"), TEXT("Error"), MB_OK | MB_ICONERROR);
+        MessageBoxW(NULL, g_szErrorWindow, g_szErrorTitle, MB_OK | MB_ICONERROR);
         return 1;
     }
     
     // 安装键盘钩子
     if (!InstallKeyboardHook()) {
-        MessageBox(NULL, TEXT("Failed to install keyboard hook!"), TEXT("Error"), MB_OK | MB_ICONERROR);
+        MessageBoxW(NULL, g_szErrorHook, g_szErrorTitle, MB_OK | MB_ICONERROR);
         DestroyWindow(g_hWnd);
         return 1;
     }
